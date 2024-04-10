@@ -112,6 +112,9 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
+  p->queue = 0;
+  p->quamtum = 0;
+  p->priority = 0;
   return p;
 }
 
@@ -319,37 +322,167 @@ wait(void)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
+
+void qpush(struct queue *q,struct proc *p){
+    if(q->size >= NPROC) return;
+    q->q[q->rear] = p;
+    q->rear = (q->rear+1)%NPROC;
+    q->size++;
+}
+struct queue *qpop(struct queue *q){
+    if(q->size == 0) return;
+    int fro;
+    fro = q->front;
+    q->front = (q->front+1)%NPROC;
+    q->size++;
+    return q->q[fro];
+}
+void qinit(struct queue *q){
+    q->size = 0;
+    q->front = 0;
+    q->rear = 0;
+}
+void priority_boosting(struct queue *q){
+    struct proc *p;
+    acquire(&ptable.lock);
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->state != RUNNABLE) continue;
+      qpush(q,p);
+  }
+  release(&ptable.lock);
+}
 void
 scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
+  struct queue *l0,*l1,*l2,*l3;
+  qinit(l0);
+  qinit(l1);
+  qinit(l2);
+  qinit(l3);
+  priority_boosting(l0);
+
   for(;;){
     // Enable interrupts on this processor.
     sti();
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+    // for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    //   if(p->state != RUNNABLE)
+    //     continue;
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
+    //   // Switch to chosen process.  It is the process's job
+    //   // to release ptable.lock and then reacquire it
+    //   // before jumping back to us.
+    //   c->proc = p;
+    //   switchuvm(p);
+    //   p->state = RUNNING;
+
+    //   swtch(&(c->scheduler), p->context);
+    //   switchkvm();
+
+    //   // Process is done running for now.
+    //   // It should have changed its p->state before coming back.
+    //   c->proc = 0;
+    // }
+    if(ticks >= 100){
+        qinit(l0);
+        qinit(l1);
+        qinit(l2);
+        qinit(l3);
+        priority_boosting(l0);
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+            p->queue = 0;
+            p->quamtum = 0;
+            p->priority = 0;
+        }
+    }
+    int l0flag = 0;
+    if(l0->size !=0){
+        p = qpop(l0);
+        c->proc = p;
+        witchuvm(p);
+        p->state = RUNNING;
+        swtch(&(c->scheduler),p->context);
+        switchkvm();
+        c->proc = 0;
+    }
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+        if(p->state != RUNNABLE) continue;
+
+        if(p->queue == 0){
+          c->proc = p;
+          switchuvm(p);
+          p->state = RUNNING;
+          swtch(&(c->scheduler),p->context);
+          switchkvm();
+          c->proc = 0;
+          l0flag = 1;
+        }
+    }
+    if(l0flag == 1){
+      release(&ptable.lock);
+      continue;
+    }
+
+    int l1flag = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+        if(p->state != RUNNABLE) continue;
+
+        if(p->queue == 1){
+          c->proc = p;
+          switchuvm(p);
+          p->state = RUNNING;
+          swtch(&(c->scheduler),p->context);
+          switchkvm();
+          c->proc = 0;
+          l1flag = 1;
+        }
+    }
+    if(l1flag == 1){
+      release(&ptable.lock);
+      continue;
+    }
+
+    int l2flag = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+        if(p->state != RUNNABLE) continue;
+
+        if(p->queue == 2){
+          c->proc = p;
+          switchuvm(p);
+          p->state = RUNNING;
+          swtch(&(c->scheduler),p->context);
+          switchkvm();
+          c->proc = 0;
+          l2flag = 1;
+        }
+    }
+    if(l2flag == 1){
+      release(&ptable.lock);
+      continue;
+    }
+
+    int max_priority = -1;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+        if(p->state != RUNNABLE) continue;
+
+        if(p->queue == 3 && max_priority < p->priority){
+          max_priority = p->priority;
+          c->proc = p;
+        }
+    }
+    if(max_priority > -1){
       switchuvm(p);
       p->state = RUNNING;
-
-      swtch(&(c->scheduler), p->context);
+      swtch(&(c->scheduler),p->context);
       switchkvm();
-
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
       c->proc = 0;
     }
+
     release(&ptable.lock);
 
   }
@@ -387,6 +520,26 @@ yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
+  myproc()->quamtum += 1;
+  if(myproc()->queue*2 + 2 == myproc()->quamtum){
+      myproc()->quamtum = 0;
+      if(myproc()->queue == 0){
+          if(myproc()->pid % 2 == 1){
+              myproc()->queue = 1;
+          }
+          if(myproc()->pid % 2 == 0){
+              myproc()->queue = 2;
+          }
+      }
+      else if(myproc()->queue == 1 && myproc()->queue == 2){
+        myproc()->queue = 3;
+      }
+      else if(myproc()->queue == 3){
+          if(myproc()->priority > 0){
+            myproc()->priority -= 1;
+          }
+      }
+  }
   sched();
   release(&ptable.lock);
 }
