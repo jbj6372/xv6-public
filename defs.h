@@ -121,6 +121,11 @@ int             wait(void);
 void            wakeup(void*);
 void            yield(void);
 int             getgpid(void);
+int             setpriority(int,int);
+int             setmonopoly(int,int);
+void            monopolize(void);
+void            unmonopolize(void);
+void            rn_sleep(int);
 
 // swtch.S
 void            swtch(struct context**, struct context*);

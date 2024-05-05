@@ -40,6 +40,50 @@ sys_yield(void)
 {
   yield();
 }
+int sys_getlev(void)
+{
+  return myproc()->queue;
+}
+int sys_setpriority(void)
+{
+  int pid,priority;
+  if(argint(0, &pid)<0) return -1;
+  if(argint(1, &priority)<0) return -1;
+  return setpriority(pid,priority);
+}
+int sys_setmonopoly(void)
+{
+  int pid,password;
+  if(argint(0, &pid)<0) return -1;
+  if(argint(1, &password)<0) return -1;
+  return setmonopoly(pid,password);
+}
+void sys_monopolize(void)
+{
+  monopolize();
+}
+void sys_rn_sleep(void) {
+  int ms, prev, cur, ms_tick;
+  if(argint(0, &ms) < 0)
+    return;
+
+  prev = lapic[0x0390 / 4];
+  ms_tick = 0;
+  for (; ;) {
+    cur = lapic[0x0390 / 4];
+
+    if (cur + 1000000 <= prev) {
+      if (++ms_tick == ms) break;
+      prev -= 1000000;
+    } else if (cur >= prev) {
+      prev += 10000000;
+    }
+  }
+}
+void sys_unmonopolize(void)
+{
+  unmonopolize();
+}
 int
 sys_getpid(void)
 {

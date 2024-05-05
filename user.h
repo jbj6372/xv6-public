@@ -25,6 +25,12 @@ int sleep(int);
 int uptime(void);
 int getgpid(void);
 void yield(void);
+int getlev(void);
+int setpriority(int,int);
+int setmonopoly(int,int);
+void monopolize(void);
+void unmonopolize(void);
+void rn_sleep(int);
 
 // ulib.c
 int stat(const char*, struct stat*);
